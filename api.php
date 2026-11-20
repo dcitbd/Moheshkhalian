@@ -686,7 +686,9 @@ if ($action === 'admin_dashboard') {
         'admins_total'      => intval($pdo->query("SELECT COUNT(*) FROM administration")->fetchColumn()),
         'users_total'       => intval($pdo->query("SELECT COUNT(*) FROM users")->fetchColumn()),
         'notices_total'     => intval($pdo->query("SELECT COUNT(*) FROM notices")->fetchColumn()),
-        'reports_pending'   => intval($pdo->query("SELECT COUNT(*) FROM reports WHERE status = 'pending'")->fetchColumn())
+        'reports_pending'   => intval($pdo->query("SELECT COUNT(*) FROM reports WHERE status = 'pending'")->fetchColumn()),
+        'subscribers_total' => intval($pdo->query("SELECT COUNT(*) FROM subscribers")->fetchColumn()),
+        'comments_total'    => intval($pdo->query("SELECT COUNT(*) FROM comments")->fetchColumn())
     );
     $logs = $pdo->query("SELECT * FROM login_logs ORDER BY id DESC LIMIT 15")->fetchAll();
     respond(array('ok' => true, 'stats' => $stats, 'login_logs' => $logs));
@@ -948,6 +950,47 @@ if ($action === 'admin_delete_subscriber') {
     requirePermission($pdo, 'reports');
     $b = getJsonBody();
     $pdo->prepare("DELETE FROM subscribers WHERE id = ?")->execute(array(intval($b['id'])));
+    respond(array('ok' => true));
+}
+
+
+// Admin Comments Moderation
+if ($action === 'admin_comments') {
+    requirePermission($pdo, 'news');
+    $rows = $pdo->query("SELECT * FROM comments ORDER BY id DESC LIMIT 200")->fetchAll();
+    respond(array('ok' => true, 'comments' => $rows));
+}
+if ($action === 'admin_delete_comment') {
+    requirePermission($pdo, 'news');
+    $b = getJsonBody();
+    $pdo->prepare("DELETE FROM comments WHERE id = ?")->execute(array(intval($b['id'])));
+    respond(array('ok' => true));
+}
+if ($action === 'admin_delete_report') {
+    requirePermission($pdo, 'reports');
+    $b = getJsonBody();
+    $pdo->prepare("DELETE FROM reports WHERE id = ?")->execute(array(intval($b['id'])));
+    respond(array('ok' => true));
+}
+
+
+// Admin Uploaded Media Gallery
+if ($action === 'admin_media') {
+    requirePermission($pdo, '');
+    $rows = $pdo->query("SELECT * FROM uploaded_files ORDER BY id DESC LIMIT 100")->fetchAll();
+    respond(array('ok' => true, 'files' => $rows));
+}
+if ($action === 'admin_delete_media') {
+    requirePermission($pdo, 'settings');
+    $b = getJsonBody();
+    $id = intval($b['id']);
+    $path = $pdo->prepare("SELECT saved_path FROM uploaded_files WHERE id = ?");
+    $path->execute(array($id));
+    $p = $path->fetchColumn();
+    if ($p && strpos($p, 'uploads/') === 0 && file_exists($baseDir . '/' . $p)) {
+        @unlink($baseDir . '/' . $p);
+    }
+    $pdo->prepare("DELETE FROM uploaded_files WHERE id = ?")->execute(array($id));
     respond(array('ok' => true));
 }
 

@@ -1,3 +1,11 @@
+
+function toggleAdminSidebar(open) {
+  const sb = document.getElementById('adminSidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  if (sb) sb.classList.toggle('open', open);
+  if (ov) ov.classList.toggle('open', open);
+}
+
 /**
  * মহেশখালীয়ান (Maheshkhalian) Admin Panel Controller
  * Features: Device-aware session (Mobile persistent vs Desktop tab-close logout),
@@ -112,6 +120,15 @@ function mkAdminFallback(actionStr, opts = {}) {
   if (act === 'admin_notices') return { ok: true, notices: db.notices };
   if (act === 'admin_reports') return { ok: true, reports: db.reports };
   if (act === 'admin_get_settings') return { ok: true, settings: db.settings };
+  if (act === 'admin_save_settings') { Object.assign(db.settings, body); return { ok: true }; }
+  if (act === 'admin_set_profile_status') { const p = db.profiles.find(x=>x.id==body.id); if(p) p.status=body.status; return { ok: true }; }
+  if (act === 'admin_delete_profile') { db.profiles = db.profiles.filter(x=>x.id!=body.id); return { ok: true }; }
+  if (act === 'admin_set_post_status') { const p = db.posts.find(x=>x.id==body.id); if(p) p.status=body.status; return { ok: true }; }
+  if (act === 'admin_delete_post') { db.posts = db.posts.filter(x=>x.id!=body.id); return { ok: true }; }
+  if (act === 'admin_comments') return { ok: true, comments: db.comments || [] };
+  if (act === 'admin_delete_comment') { db.comments = (db.comments||[]).filter(x=>x.id!=body.id); return { ok: true }; }
+  if (act === 'admin_subscribers') return { ok: true, subscribers: db.subscribers || [] };
+  if (act === 'admin_delete_subscriber') { db.subscribers = (db.subscribers||[]).filter(x=>x.id!=body.id); return { ok: true }; }
   return { ok: true };
 }
 
@@ -199,39 +216,46 @@ function enterDashboard() {
     { id: 'future', label: 'ফিউচার বাংলাদেশ', icon: 'fa-lightbulb', perm: 'future' },
     { id: 'news', label: 'ব্রেকিং নিউজ', icon: 'fa-newspaper', perm: 'news' },
     { id: 'poems', label: 'কবিতা ও অভিজ্ঞতা', icon: 'fa-feather-pointed', perm: 'poems' },
+    { id: 'comments', label: 'মন্তব্য মডারেশন', icon: 'fa-comments', perm: 'news' },
     { id: 'quizzes', label: 'কুইজ, সাবমিশন ও রেজাল্ট', icon: 'fa-trophy', perm: 'quizzes' },
     { id: 'administration', label: 'প্রশাসন ও পরিচালক', icon: 'fa-user-tie', perm: 'administration' },
     { id: 'users', label: 'ইউজার ও রোল ম্যানেজমেন্ট', icon: 'fa-users-gear', perm: 'users' },
     { id: 'notices', label: 'নোটিশ বোর্ড', icon: 'fa-bullhorn', perm: 'notices' },
     { id: 'reports', label: 'রিপোর্ট ও বার্তা', icon: 'fa-flag', perm: 'reports' },
     { id: 'subscribers', label: 'সাবস্ক্রাইবার তালিকা', icon: 'fa-envelope-open-text', perm: 'reports' },
+    { id: 'media', label: 'মিডিয়া ও আপলোড গ্যালারি', icon: 'fa-images', perm: '' },
     { id: 'settings', label: 'ওয়েবসাইট তথ্য ও সেটিংস', icon: 'fa-gear', perm: 'settings' }
   ];
 
   const allowed = menuItems.filter(m => m.perm === '' || hasPerm(m.perm));
   document.getElementById('sidebarMenu').innerHTML = allowed.map(m => `
     <button class="side-btn ${ADM.tab === m.id ? 'active' : ''}" data-tab="${m.id}" onclick="switchTab('${m.id}', '${m.label}')">
-      <i class="fa-solid ${m.icon}"></i> ${m.label}
+      <span class="side-btn-left"><i class="fa-solid ${m.icon}"></i> ${m.label}</span>
     </button>
   `).join('');
 
-  switchTab('overview', 'ড্যাশবোর্ড ওভারভিউ');
+  const initTab = document.body.getAttribute('data-admin-tab') || 'overview';
+  const found = allowed.find(x => x.id === initTab) || allowed[0];
+  if (found) switchTab(found.id, found.label);
 }
 
 function switchTab(tab, title) {
   ADM.tab = tab;
+  toggleAdminSidebar(false);
   document.getElementById('adminPageTitle').textContent = title;
   document.querySelectorAll('#sidebarMenu .side-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tab));
 
   if (tab === 'overview') loadOverview();
   else if (tab === 'profiles') loadAdminProfiles();
   else if (['future','news','poems'].includes(tab)) loadAdminPosts(tab === 'poems' ? 'poem' : tab);
+  else if (tab === 'comments') loadAdminComments();
   else if (tab === 'quizzes') loadAdminQuizzes();
   else if (tab === 'administration') loadAdminTeam();
   else if (tab === 'users') loadAdminUsers();
   else if (tab === 'notices') loadAdminNotices();
   else if (tab === 'reports') loadAdminReports();
   else if (tab === 'subscribers') loadAdminSubscribers();
+  else if (tab === 'media') loadAdminMedia();
   else if (tab === 'settings') loadAdminSettings();
 }
 
@@ -243,13 +267,39 @@ async function loadOverview() {
   if (!res.ok) return;
   const s = res.stats;
   document.getElementById('adminContent').innerHTML = `
-    <div class="counters-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));">
-      <div class="counter-card"><div class="counter-num">${s.profiles_approved}</div><div class="counter-label">অনুমোদিত প্রোফাইল (অপেক্ষমাণ: ${s.profiles_pending})</div></div>
-      <div class="counter-card"><div class="counter-num">${s.future_total}</div><div class="counter-label">ফিউচার বাংলাদেশ (অপেক্ষমাণ: ${s.future_pending})</div></div>
-      <div class="counter-card"><div class="counter-num">${s.news_total}</div><div class="counter-label">ব্রেকিং নিউজ (অপেক্ষমাণ: ${s.news_pending})</div></div>
-      <div class="counter-card"><div class="counter-num">${s.poems_total}</div><div class="counter-label">কবিতা ও অভিজ্ঞতা</div></div>
-      <div class="counter-card"><div class="counter-num">${s.submissions_total}</div><div class="counter-label">কুইজ সাবমিশন (${s.quizzes_total} কুইজ)</div></div>
-      <div class="counter-card"><div class="counter-num">${s.reports_pending}</div><div class="counter-label">নতুন রিপোর্ট/বার্তা</div></div>
+    <div class="kpi-grid">
+      <div class="kpi-card" onclick="switchTab('profiles','প্রোফাইল ও ব্যাচ (১৯৭১+)')">
+        <div class="kpi-icon kpi-emerald"><i class="fa-solid fa-users"></i></div>
+        <div><div class="kpi-value">${s.profiles_approved}</div><div class="kpi-label">অনুমোদিত প্রোফাইল</div><div class="kpi-sub">অপেক্ষমাণ: ${s.profiles_pending}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('future','ফিউচার বাংলাদেশ')">
+        <div class="kpi-icon kpi-ocean"><i class="fa-solid fa-lightbulb"></i></div>
+        <div><div class="kpi-value">${s.future_total}</div><div class="kpi-label">ফিউচার বাংলাদেশ</div><div class="kpi-sub">অপেক্ষমাণ: ${s.future_pending}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('news','ব্রেকিং নিউজ')">
+        <div class="kpi-icon kpi-rose"><i class="fa-solid fa-newspaper"></i></div>
+        <div><div class="kpi-value">${s.news_total}</div><div class="kpi-label">ব্রেকিং নিউজ</div><div class="kpi-sub">অপেক্ষমাণ: ${s.news_pending}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('poems','কবিতা ও অভিজ্ঞতা')">
+        <div class="kpi-icon kpi-indigo"><i class="fa-solid fa-feather-pointed"></i></div>
+        <div><div class="kpi-value">${s.poems_total}</div><div class="kpi-label">কবিতা ও অভিজ্ঞতা</div><div class="kpi-sub">অপেক্ষমাণ: ${s.poems_pending || 0}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('quizzes','কুইজ, সাবমিশন ও রেজাল্ট')">
+        <div class="kpi-icon kpi-amber"><i class="fa-solid fa-trophy"></i></div>
+        <div><div class="kpi-value">${s.submissions_total}</div><div class="kpi-label">কুইজ সাবমিশন</div><div class="kpi-sub">মোট কুইজ: ${s.quizzes_total}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('administration','প্রশাসন ও পরিচালক')">
+        <div class="kpi-icon kpi-teal"><i class="fa-solid fa-user-tie"></i></div>
+        <div><div class="kpi-value">${s.admins_total || 0}</div><div class="kpi-label">প্রশাসন ও পরিচালক</div><div class="kpi-sub">ইউজার: ${s.users_total || 0}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('reports','রিপোর্ট ও বার্তা')">
+        <div class="kpi-icon kpi-rose"><i class="fa-solid fa-flag"></i></div>
+        <div><div class="kpi-value">${s.reports_pending}</div><div class="kpi-label">নতুন রিপোর্ট ও বার্তা</div><div class="kpi-sub">নোটিশ: ${s.notices_total || 0}</div></div>
+      </div>
+      <div class="kpi-card" onclick="switchTab('subscribers','সাবস্ক্রাইবার তালিকা')">
+        <div class="kpi-icon kpi-ocean"><i class="fa-solid fa-envelope-open-text"></i></div>
+        <div><div class="kpi-value">${s.subscribers_total || 0}</div><div class="kpi-label">সাবস্ক্রাইবার</div><div class="kpi-sub">মন্তব্য: ${s.comments_total || 0}</div></div>
+      </div>
     </div>
 
     <h3 style="margin:18px 0 10px; color:var(--navy);">সর্বশেষ লগইন ট্র্যাকিং (একাউন্ট মনিটরিং)</h3>
@@ -444,8 +494,17 @@ async function saveAdminProfile(id) {
 // ==========================================
 async function loadAdminPosts(cat) {
   document.getElementById('adminContent').innerHTML = `
-    <div style="display:flex; justify-content:space-between; margin-bottom:14px;">
-      <input type="text" id="admPostQ" class="form-control" placeholder="খুঁজুন..." style="width:240px;" oninput="fetchAdminPosts('${cat}')">
+    <div id="admPostCounters" class="counters-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:14px;"></div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:14px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input type="text" id="admPostQ" class="form-control" placeholder="শিরোনাম বা লেখক খুঁজুন..." style="width:220px;" oninput="fetchAdminPosts('${cat}')">
+        <select id="admPostStatus" class="form-control" style="width:165px;" onchange="fetchAdminPosts('${cat}')">
+          <option value="all">সকল স্ট্যাটাস</option>
+          <option value="pending">অপেক্ষমাণ (Pending)</option>
+          <option value="approved">অনুমোদিত (Approved)</option>
+          <option value="rejected">বাতিল (Rejected)</option>
+        </select>
+      </div>
       <button class="btn btn-primary btn-sm" onclick="openEditPostModal('${cat}')"><i class="fa-solid fa-plus"></i> নতুন যোগ করুন</button>
     </div>
     <div class="data-table-wrap" id="admPostsTable">লোড হচ্ছে...</div>
@@ -455,8 +514,20 @@ async function loadAdminPosts(cat) {
 
 async function fetchAdminPosts(cat) {
   const q = encodeURIComponent(document.getElementById('admPostQ').value);
-  const res = await apiFetch(`posts&admin=1&category=${cat}&q=${q}`);
+  const st = encodeURIComponent(document.getElementById('admPostStatus')?.value || 'all');
+  const res = await apiFetch(`posts&admin=1&category=${cat}&q=${q}&status=${st}`);
   if (!res.ok) return;
+  const total = res.posts.length;
+  const appCnt = res.posts.filter(x => x.status === 'approved').length;
+  const penCnt = res.posts.filter(x => x.status === 'pending').length;
+  const cEl = document.getElementById('admPostCounters');
+  if (cEl) {
+    cEl.innerHTML = `
+      <div class="counter-card"><div class="counter-num">${total}</div><div class="counter-label">মোট তালিকা</div></div>
+      <div class="counter-card"><div class="counter-num" style="color:var(--primary)">${appCnt}</div><div class="counter-label">অনুমোদিত</div></div>
+      <div class="counter-card"><div class="counter-num" style="color:#d97706">${penCnt}</div><div class="counter-label">অপেক্ষমাণ</div></div>
+    `;
+  }
   document.getElementById('admPostsTable').innerHTML = `
     <table>
       <thead><tr><th>শিরোনাম</th><th>লেখক</th><th>ট্যাগ</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr></thead>
@@ -468,15 +539,27 @@ async function fetchAdminPosts(cat) {
             <td>${escapeHtml(p.tag)}</td>
             <td><span class="status-pill st-${p.status}">${p.status}</span></td>
             <td style="white-space:nowrap;">
-              ${p.status !== 'approved' ? `<button class="btn btn-primary btn-sm" onclick="setPostStatus(${p.id}, 'approved', '${cat}')"><i class="fa-solid fa-check"></i></button>` : ''}
-              <button class="btn btn-outline btn-sm" onclick='openEditPostModal("${cat}", ${JSON.stringify(p).replace(/'/g, "&#39;")})'><i class="fa-solid fa-pen"></i></button>
-              <button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deletePost(${p.id}, '${cat}')"><i class="fa-solid fa-trash"></i></button>
+              <button class="btn btn-outline btn-sm" title="QuickView" onclick='quickViewPost(${JSON.stringify(p).replace(/'/g, "&#39;")})'><i class="fa-solid fa-eye"></i></button>
+              ${p.status !== 'approved' ? `<button class="btn btn-primary btn-sm" title="অনুমোদন" onclick="setPostStatus(${p.id}, 'approved', '${cat}')"><i class="fa-solid fa-check"></i></button>` : ''}
+              ${p.status !== 'rejected' ? `<button class="btn btn-outline btn-sm" title="বাতিল" style="color:#b45309" onclick="setPostStatus(${p.id}, 'rejected', '${cat}')"><i class="fa-solid fa-ban"></i></button>` : ''}
+              <button class="btn btn-outline btn-sm" title="এডিট" onclick='openEditPostModal("${cat}", ${JSON.stringify(p).replace(/'/g, "&#39;")})'><i class="fa-solid fa-pen"></i></button>
+              <button class="btn btn-outline btn-sm" title="ডিলিট" style="color:var(--danger)" onclick="deletePost(${p.id}, '${cat}')"><i class="fa-solid fa-trash"></i></button>
             </td>
           </tr>
-        `).join('')}
+        `).join('') || '<tr><td colspan="5" style="text-align:center;">কোনো তথ্য পাওয়া যায়নি</td></tr>'}
       </tbody>
     </table>
   `;
+}
+
+function quickViewPost(p) {
+  openAdmModal(`
+    ${p.image ? `<img src="${escapeHtml(p.image)}" style="width:100%; max-height:220px; object-fit:cover; border-radius:12px; margin-bottom:12px;">` : ''}
+    <span class="status-pill st-${p.status}">${p.status}</span> <span style="font-size:0.85rem; color:var(--muted);">${escapeHtml(p.tag)}</span>
+    <h3 style="margin:8px 0;">${escapeHtml(p.title)}</h3>
+    <div style="font-size:0.86rem; color:var(--primary); margin-bottom:10px;">লেখক: ${escapeHtml(p.author_name)} ${p.author_batch ? '(SSC ' + escapeHtml(p.author_batch) + ')' : ''}</div>
+    <div style="white-space:pre-line; font-size:0.94rem; line-height:1.8; background:#f8fbfa; padding:12px; border-radius:10px;">${escapeHtml(p.content)}</div>
+  `);
 }
 
 async function setPostStatus(id, status, cat) {
@@ -857,7 +940,10 @@ async function loadAdminNotices() {
               <td><strong>${escapeHtml(n.title)}</strong></td>
               <td>${escapeHtml(n.body)}</td>
               <td><span class="status-pill ${n.is_active ? 'st-approved' : 'st-pending'}">${n.is_active ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span></td>
-              <td><button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteNotice(${n.id})"><i class="fa-solid fa-trash"></i></button></td>
+              <td style="white-space:nowrap;">
+      <button class="btn btn-outline btn-sm" onclick='openNoticeModal(${JSON.stringify(n).replace(/'/g, "&#39;")})'><i class="fa-solid fa-pen"></i></button>
+      <button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteNotice(${n.id})"><i class="fa-solid fa-trash"></i></button>
+    </td>
             </tr>
           `).join('')}
         </tbody>
@@ -866,23 +952,28 @@ async function loadAdminNotices() {
   `;
 }
 
-function openNoticeModal() {
+function openNoticeModal(n = null) {
+  const d = n || { id:0, title:'', body:'', priority:'high', is_active:1 };
   openAdmModal(`
-    <h3>নতুন নোটিশ</h3>
+    <h3>${d.id ? 'নোটিশ এডিট করুন' : 'নতুন নোটিশ'}</h3>
     <div style="display:grid; gap:10px; margin-top:12px;">
-      <input type="text" id="ntTitle" class="form-control" placeholder="নোটিশ শিরোনাম *">
-      <textarea id="ntBody" class="form-control" rows="3" placeholder="বিস্তারিত..."></textarea>
-      <button class="btn btn-primary" onclick="saveNotice()">প্রকাশ করুন</button>
+      <input type="text" id="ntTitle" class="form-control" placeholder="নোটিশ শিরোনাম *" value="${escapeHtml(d.title)}">
+      <textarea id="ntBody" class="form-control" rows="3" placeholder="বিস্তারিত...">${escapeHtml(d.body)}</textarea>
+      <select id="ntActive" class="form-control">
+        <option value="1" ${d.is_active ? 'selected' : ''}>সক্রিয় (লাইভ)</option>
+        <option value="0" ${!d.is_active ? 'selected' : ''}>নিষ্ক্রিয় (লুকানো)</option>
+      </select>
+      <button class="btn btn-primary" onclick="saveNotice(${d.id})">সংরক্ষণ করুন</button>
     </div>
   `);
 }
 
-async function saveNotice() {
+async function saveNotice(id = 0) {
   await apiFetch('admin_save_notice', {
     method:'POST',
-    body: JSON.stringify({ id:0, title: document.getElementById('ntTitle').value, body: document.getElementById('ntBody').value, priority:'high', is_active:1 })
+    body: JSON.stringify({ id, title: document.getElementById('ntTitle').value, body: document.getElementById('ntBody').value, priority:'high', is_active: parseInt(document.getElementById('ntActive').value) })
   });
-  closeAdmModal(); showToast('নোটিশ প্রকাশিত হয়েছে!'); loadAdminNotices();
+  closeAdmModal(); showToast('নোটিশ সংরক্ষিত হয়েছে!'); loadAdminNotices();
 }
 
 async function deleteNotice(id) {
@@ -944,9 +1035,20 @@ async function loadAdminSettings() {
         <textarea id="stAbout" class="form-control" rows="3">${escapeHtml(s.about_text || '')}</textarea>
         <label>লোগো URL</label>
         <input type="text" id="stLogo" class="form-control" value="${escapeHtml(s.logo_url || '')}">
+        <label>ব্যানার ১ ও ব্যানার ২ URL</label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input type="text" id="stBanner1" class="form-control" value="${escapeHtml(s.banner_url || 'assets/images/banner1.png')}">
+          <input type="text" id="stBanner2" class="form-control" value="${escapeHtml(s.banner2_url || 'assets/images/banner2.png')}">
+        </div>
+        <label>প্রাইভেসি পলিসি পেজ (privacy-policy.html)</label>
+        <textarea id="stPrivacy" class="form-control" rows="2">${escapeHtml(s.privacy_text || '')}</textarea>
+        <label>শর্তাবলি ও নীতিমালা পেজ (terms-and-conditions.html)</label>
+        <textarea id="stTerms" class="form-control" rows="2">${escapeHtml(s.terms_text || '')}</textarea>
+        <label>বিজ্ঞাপন ও সহযোগিতা পেজ (advertise.html)</label>
+        <textarea id="stAdvertise" class="form-control" rows="2">${escapeHtml(s.advertise_text || '')}</textarea>
         <label>ফুটার টেক্সট</label>
         <input type="text" id="stFooter" class="form-control" value="${escapeHtml(s.footer_text || '')}">
-        <button class="btn btn-primary" onclick="saveSiteSettings()">সেটিংস সংরক্ষণ করুন</button>
+        <button class="btn btn-primary" onclick="saveSiteSettings()">সেটিংস ও পেজ তথ্য সংরক্ষণ করুন</button>
       </div>
     </div>
   `;
@@ -965,6 +1067,11 @@ async function saveSiteSettings() {
       contact_address: document.getElementById('stAddr').value,
       about_text: document.getElementById('stAbout').value,
       logo_url: document.getElementById('stLogo').value,
+      banner_url: document.getElementById('stBanner1').value,
+      banner2_url: document.getElementById('stBanner2').value,
+      privacy_text: document.getElementById('stPrivacy').value,
+      terms_text: document.getElementById('stTerms').value,
+      advertise_text: document.getElementById('stAdvertise').value,
       footer_text: document.getElementById('stFooter').value
     })
   });
@@ -1016,4 +1123,75 @@ async function deleteSubscriber(id) {
   await apiFetch('admin_delete_subscriber', { method:'POST', body:JSON.stringify({id}) });
   showToast('সাবস্ক্রাইবার মুছে ফেলা হয়েছে');
   loadAdminSubscribers();
+}
+
+async function loadAdminComments() {
+  const res = await apiFetch('admin_comments');
+  const list = res.ok ? (res.comments || []) : [];
+  document.getElementById('adminContent').innerHTML = `
+    <h3 style="margin-bottom:12px;">সকল মন্তব্য মডারেশন (${list.length})</h3>
+    <div class="data-table-wrap">
+      <table>
+        <thead><tr><th>ধরন</th><th>মন্তব্যকারী</th><th>মন্তব্য</th><th>অ্যাকশন</th></tr></thead>
+        <tbody>
+          ${list.map(c => `
+            <tr>
+              <td><span class="status-pill st-active">${escapeHtml(c.target_type)} #${c.target_id}</span></td>
+              <td><strong>${escapeHtml(c.author_name)}</strong></td>
+              <td>${escapeHtml(c.comment_text)}</td>
+              <td><button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteCommentAdm(${c.id})"><i class="fa-solid fa-trash"></i></button></td>
+            </tr>
+          `).join('') || '<tr><td colspan="4" style="text-align:center;">কোনো মন্তব্য নেই</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+async function deleteCommentAdm(id) {
+  await apiFetch('admin_delete_comment', { method:'POST', body:JSON.stringify({id}) });
+  showToast('মন্তব্য ডিলিট হয়েছে');
+  loadAdminComments();
+}
+
+async function loadAdminMedia() {
+  const res = await apiFetch('admin_media');
+  const files = res.ok ? (res.files || []) : [];
+  document.getElementById('adminContent').innerHTML = `
+    <div class="admin-panel-card">
+      <div class="admin-toolbar">
+        <h3>আপলোড করা ছবি ও মিডিয়া গ্যালারি (${files.length})</h3>
+        <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+          <i class="fa-solid fa-cloud-arrow-up"></i> নতুন ছবি আপলোড
+          <input type="file" accept="image/*" style="display:none;" onchange="uploadQuickMedia(this)">
+        </label>
+      </div>
+      <div class="media-grid">
+        ${files.map(f => `
+          <div class="media-card">
+            <img src="${escapeHtml(f.saved_path)}" onerror="this.src='assets/images/logo.png'">
+            <div class="media-card-body">
+              <div style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(f.original_name || f.saved_path)}</div>
+              <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                <button class="btn btn-outline btn-sm" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(f.saved_path)}'); showToast('লিংক কপি হয়েছে!')"><i class="fa-solid fa-copy"></i> লিংক</button>
+                <button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteMediaAdm(${f.id})"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+          </div>
+        `).join('') || '<p style="color:var(--muted);">এখনো কোনো ছবি আপলোড করা হয়নি। উপরের বাটন থেকে ছবি আপলোড করলে তা একক uploads/ ফোল্ডারে জমা হবে।</p>'}
+      </div>
+    </div>
+  `;
+}
+
+async function uploadQuickMedia(inp) {
+  if (!inp.files[0]) return;
+  const fd = new FormData(); fd.append('file', inp.files[0]); fd.append('folder', 'gallery');
+  const res = await apiFetch('upload_image', { method:'POST', body:fd });
+  if (res.ok) { showToast('ছবি uploads/ ফোল্ডারে সংরক্ষিত হয়েছে!'); loadAdminMedia(); }
+}
+
+async function deleteMediaAdm(id) {
+  if (!confirm('ছবিটি ডিলিট করবেন?')) return;
+  await apiFetch('admin_delete_media', { method:'POST', body:JSON.stringify({id}) });
+  loadAdminMedia();
 }

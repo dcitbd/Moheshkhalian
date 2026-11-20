@@ -249,12 +249,21 @@ async function initApp() {
     document.getElementById('preloader').classList.add('hide');
   }, 850);
 
-  // Check URL hash for direct detail/page link
+  // Check page attributes, query params & URL hash for direct multi-page routing
+  const urlParams = new URLSearchParams(window.location.search);
+  const initPage = document.body.getAttribute('data-initial-page') || '';
+  const initYear = document.body.getAttribute('data-batch-year') || urlParams.get('year') || '';
+  const postIdParam = urlParams.get('id') || '';
   const hash = window.location.hash.replace('#', '');
-  if (hash.startsWith('post/')) {
-    const pid = hash.split('/')[1];
-    openPostDetail(pid);
-  } else if (['profiles','future','news','poems','quizzes','administration','contact'].includes(hash)) {
+
+  if (initPage === 'post_detail' && postIdParam) {
+    openPostDetail(postIdParam);
+  } else if (hash.startsWith('post/')) {
+    openPostDetail(hash.split('/')[1]);
+  } else if (initPage) {
+    STATE.initialBatchYear = initYear;
+    navigate(initPage, true);
+  } else if (['profiles','future','news','poems','quizzes','administration','contact','ssc_batches','about','privacy','terms','advertise','notices'].includes(hash)) {
     navigate(hash);
   } else {
     navigate('home');
@@ -300,22 +309,34 @@ function renderNotifications() {
 }
 
 // Navigation Router
-function navigate(page) {
+function navigate(page, skipHash = false) {
   STATE.page = page;
-  window.location.hash = page === 'home' ? '' : page;
+  if (!skipHash) window.location.hash = page === 'home' ? '' : page;
   document.querySelectorAll('.nav-link, .mob-nav-btn').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-page') === page);
   });
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
   if (page === 'home') renderHome();
-  else if (page === 'profiles') renderProfilesPage();
+  else if (page === 'profiles') renderProfilesPage(STATE.initialBatchYear || '');
+  else if (page === 'ssc_batches') renderAllBatchesDirectory();
   else if (page === 'future') renderPostsPage('future', 'ফিউচার বাংলাদেশ ও মহেশখালী', 'fa-lightbulb');
   else if (page === 'news') renderPostsPage('news', 'ব্রেকিং নিউজ', 'fa-newspaper');
   else if (page === 'poems') renderPostsPage('poem', 'কবিতা ও অভিজ্ঞতা', 'fa-feather-pointed');
   else if (page === 'quizzes') renderQuizzesPage();
   else if (page === 'administration') renderAdministrationPage();
   else if (page === 'contact') renderContactPage();
+  else if (page === 'about') renderInfoPage('আমাদের সম্পর্কে — সাগর কন্যা মহেশখালী', STATE.settings.about_text || 'মহেশখালী বাংলাদেশের একমাত্র পাহাড়ী দ্বীপ এবং প্রথম ডিজিটাল দ্বীপ। ১৯৭১ থেকে বর্তমান পর্যন্ত মহেশখালীর সকল প্রজন্মকে একত্রিত করার প্ল্যাটফর্ম হলো মহেশখালীয়ান।');
+  else if (page === 'privacy') renderInfoPage('প্রাইভেসি পলিসি', STATE.settings.privacy_text || '');
+  else if (page === 'terms') renderInfoPage('শর্তাবলি ও নীতিমালা', STATE.settings.terms_text || '');
+  else if (page === 'advertise') renderInfoPage('বিজ্ঞাপন ও সহযোগিতা', STATE.settings.advertise_text || '');
+  else if (page === 'notices') renderNoticesBoardPage();
+  else if (page === 'install') { renderHome(); setTimeout(() => triggerPwaInstall(), 250); }
+  else if (page === 'submit_profile') { renderProfilesPage(); setTimeout(() => openProfileSubmitModal(), 250); }
+  else if (page === 'submit_future') { renderPostsPage('future', 'ফিউচার বাংলাদেশ ও মহেশখালী', 'fa-lightbulb'); setTimeout(() => openPostSubmitModal('future'), 250); }
+  else if (page === 'submit_news') { renderPostsPage('news', 'ব্রেকিং নিউজ', 'fa-newspaper'); setTimeout(() => openPostSubmitModal('news'), 250); }
+  else if (page === 'submit_poem') { renderPostsPage('poem', 'কবিতা ও অভিজ্ঞতা', 'fa-feather-pointed'); setTimeout(() => openPostSubmitModal('poem'), 250); }
+  else if (page === 'report') { renderContactPage(); setTimeout(() => openReportModal(), 250); }
 }
 
 // ==========================================
@@ -325,7 +346,7 @@ function navigate(page) {
 let HERO_BANNER_IDX = 0;
 let HERO_BANNER_TIMER = null;
 function setHeroBanner(idx) {
-  const banners = [STATE.settings.banner_url || 'assets/images/banner1.png', 'assets/images/banner2.png'];
+  const banners = [STATE.settings.banner_url || 'assets/images/banner1.png', STATE.settings.banner2_url || 'assets/images/banner2.png'];
   HERO_BANNER_IDX = idx % banners.length;
   const img = document.getElementById('heroSlideImg');
   if (img) {
@@ -512,7 +533,7 @@ async function renderHome() {
 // ==========================================
 // PROFILES PAGE (1971 - CURRENT)
 // ==========================================
-async function renderProfilesPage() {
+async function renderProfilesPage(initialYear = '') {
   const root = document.getElementById('appRoot');
   const years = [];
   const currentYear = new Date().getFullYear();
@@ -542,6 +563,10 @@ async function renderProfilesPage() {
     <div class="cards-grid" id="profilesGrid"><p>প্রোফাইল লোড হচ্ছে...</p></div>
   `;
 
+  if (initialYear) {
+    const sel = document.getElementById('profBatchFilter');
+    if (sel) sel.value = initialYear;
+  }
   await loadProfiles(true);
 }
 
@@ -1307,4 +1332,53 @@ async function submitHomeContact() {
     document.getElementById('homeCntMsg').value = '';
     showToast(res.message);
   }
+}
+
+async function renderAllBatchesDirectory() {
+  const cy = new Date().getFullYear();
+  const res = await apiCall('action=profiles');
+  const map = {};
+  if (res.ok && res.batch_counts) res.batch_counts.forEach(b => { map[String(b.ssc_batch)] = b.cnt; });
+  let cards = '';
+  for (let y = cy; y >= 1971; y--) {
+    const cnt = map[String(y)] || 0;
+    cards += `<a href="javascript:void(0)" onclick="STATE.initialBatchYear='${y}'; navigate('profiles')" class="counter-card" style="text-decoration:none;">
+      <div class="counter-num">${y}</div>
+      <div class="counter-label">SSC ব্যাচ ${y} (${cnt} জন)</div>
+    </a>`;
+  }
+  document.getElementById('appRoot').innerHTML = `
+    <div class="section-header">
+      <h2 class="section-title"><i class="fa-solid fa-graduation-cap"></i> সকল এসএসসি ব্যাচ (১৯৭১ – ${cy})</h2>
+      <button class="btn btn-primary btn-sm" onclick="openProfileSubmitModal()">+ আপনার প্রোফাইল যুক্ত করুন</button>
+    </div>
+    <div class="counters-grid">${cards}</div>
+  `;
+}
+
+function renderInfoPage(title, bodyText) {
+  document.getElementById('appRoot').innerHTML = `
+    <div style="background:rgba(255,255,255,0.95); padding:28px; border-radius:20px; border:1px solid var(--border); box-shadow:var(--shadow-sm); max-width:860px; margin:0 auto;">
+      <h2 style="color:var(--navy); margin-bottom:14px;"><i class="fa-solid fa-circle-info" style="color:var(--primary)"></i> ${escapeHtml(title)}</h2>
+      <p style="font-size:1.02rem; line-height:1.9; color:var(--ink); white-space:pre-line;">${escapeHtml(bodyText)}</p>
+      <div style="margin-top:20px;"><a href="index.html" class="btn btn-primary btn-sm">হোম পেজে ফিরুন</a></div>
+    </div>
+  `;
+}
+
+function renderNoticesBoardPage() {
+  document.getElementById('appRoot').innerHTML = `
+    <div class="section-header">
+      <h2 class="section-title"><i class="fa-solid fa-bullhorn"></i> নোটিশ ও ঘোষণা বোর্ড</h2>
+      <button class="btn btn-outline btn-sm" onclick="requestPushPermission()"><i class="fa-solid fa-bell"></i> পুশ নোটিফিকেশন চালু করুন</button>
+    </div>
+    <div style="display:grid; gap:12px;">
+      ${(STATE.notices || []).map(n => `
+        <div style="background:rgba(255,255,255,0.95); padding:18px; border-radius:14px; border-left:4px solid var(--primary); border:1px solid var(--border);">
+          <h3 style="color:var(--navy);">${escapeHtml(n.title)}</h3>
+          <p style="color:var(--muted); margin-top:6px;">${escapeHtml(n.body)}</p>
+        </div>
+      `).join('') || '<p>কোনো সক্রিয় নোটিশ নেই।</p>'}
+    </div>
+  `;
 }

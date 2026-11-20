@@ -1,4 +1,4 @@
-const CACHE_NAME = 'maheshkhalian-v4';
+const CACHE_NAME = 'maheshkhalian-v6';
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
