@@ -204,6 +204,7 @@ function enterDashboard() {
     { id: 'users', label: 'ইউজার ও রোল ম্যানেজমেন্ট', icon: 'fa-users-gear', perm: 'users' },
     { id: 'notices', label: 'নোটিশ বোর্ড', icon: 'fa-bullhorn', perm: 'notices' },
     { id: 'reports', label: 'রিপোর্ট ও বার্তা', icon: 'fa-flag', perm: 'reports' },
+    { id: 'subscribers', label: 'সাবস্ক্রাইবার তালিকা', icon: 'fa-envelope-open-text', perm: 'reports' },
     { id: 'settings', label: 'ওয়েবসাইট তথ্য ও সেটিংস', icon: 'fa-gear', perm: 'settings' }
   ];
 
@@ -230,6 +231,7 @@ function switchTab(tab, title) {
   else if (tab === 'users') loadAdminUsers();
   else if (tab === 'notices') loadAdminNotices();
   else if (tab === 'reports') loadAdminReports();
+  else if (tab === 'subscribers') loadAdminSubscribers();
   else if (tab === 'settings') loadAdminSettings();
 }
 
@@ -276,9 +278,15 @@ async function loadOverview() {
 async function loadAdminProfiles() {
   document.getElementById('adminContent').innerHTML = `
     <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:space-between; margin-bottom:14px;">
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <input type="text" id="admProfQ" class="form-control" placeholder="নাম/ব্যাচ/পেশা..." style="width:220px;" oninput="fetchAdminProfiles()">
-        <select id="admProfStatus" class="form-control" style="width:160px;" onchange="fetchAdminProfiles()">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; flex:1;">
+        <input type="text" id="admProfQ" class="form-control" placeholder="নাম/ঠিকানা খুঁজুন..." style="width:180px;" oninput="fetchAdminProfiles()">
+        <select id="admProfBatch" class="form-control" style="width:135px;" onchange="fetchAdminProfiles()">
+          <option value="all">সকল ব্যাচ</option>
+          ${(() => { const cy = new Date().getFullYear(); let o = ''; for(let y=cy; y>=1971; y--) o += `<option value="${y}">SSC ${y}</option>`; return o; })()}
+        </select>
+        <input type="text" id="admProfEdu" class="form-control" placeholder="শিক্ষাগত যোগ্যতা..." style="width:150px;" oninput="fetchAdminProfiles()">
+        <input type="text" id="admProfJob" class="form-control" placeholder="পেশা..." style="width:130px;" oninput="fetchAdminProfiles()">
+        <select id="admProfStatus" class="form-control" style="width:145px;" onchange="fetchAdminProfiles()">
           <option value="all">সকল স্ট্যাটাস</option>
           <option value="pending">অপেক্ষমাণ (Pending)</option>
           <option value="approved">অনুমোদিত (Approved)</option>
@@ -294,7 +302,10 @@ async function loadAdminProfiles() {
 async function fetchAdminProfiles() {
   const q = encodeURIComponent(document.getElementById('admProfQ').value);
   const st = encodeURIComponent(document.getElementById('admProfStatus').value);
-  const res = await apiFetch(`profiles&admin=1&q=${q}&status=${st}`);
+  const batch = encodeURIComponent(document.getElementById('admProfBatch')?.value || 'all');
+  const edu = encodeURIComponent(document.getElementById('admProfEdu')?.value || '');
+  const prof = encodeURIComponent(document.getElementById('admProfJob')?.value || '');
+  const res = await apiFetch(`profiles&admin=1&q=${q}&status=${st}&batch=${batch}&education=${edu}&profession=${prof}`);
   if (!res.ok) return;
 
   document.getElementById('admProfilesTable').innerHTML = `
@@ -343,7 +354,12 @@ function bindAdmImagePreview(fileId, urlId, prevId, folder) {
     if (!f.files[0]) return;
     const fd = new FormData(); fd.append('file', f.files[0]); fd.append('folder', folder);
     const res = await apiFetch('upload_image', { method:'POST', body:fd });
-    if (res.ok) { u.value = res.url; p.innerHTML = `<img src="${escapeHtml(res.url)}">`; }
+    if (res.ok && res.url) { u.value = res.url; p.innerHTML = `<img src="${escapeHtml(res.url)}">`; showToast('ছবি আপলোড সফল!'); }
+    else {
+      const reader = new FileReader();
+      reader.onload = (ev) => { u.value = ev.target.result; p.innerHTML = `<img src="${ev.target.result}">`; };
+      reader.readAsDataURL(f.files[0]);
+    }
   });
 }
 
@@ -373,16 +389,42 @@ function openEditProfileModal(p = null) {
         <input type="text" id="epPhoto" class="form-control" placeholder="ছবির URL" value="${escapeHtml(d.photo)}">
         <div class="img-preview-box" id="epPrev">${d.photo ? `<img src="${escapeHtml(d.photo)}">` : 'প্রিভিউ'}</div>
       </div>
-      <textarea id="epSocial" class="form-control" rows="2" placeholder='সোস্যাল JSON: [{"platform":"facebook","url":"https://..."}]' style="grid-column:1/-1;">${escapeHtml(JSON.stringify(d.social_links || []))}</textarea>
+      <div style="grid-column:1/-1;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong style="font-size:0.9rem;">সোস্যাল লিংক (যত খুশি যুক্ত করুন):</strong>
+          <button type="button" class="btn btn-outline btn-sm" onclick="addAdmSocialRow()"><i class="fa-solid fa-plus"></i> লিংক বাড়ান</button>
+        </div>
+        <div id="admSocialWrap"></div>
+      </div>
     </div>
     <button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="saveAdminProfile(${d.id})">সংরক্ষণ করুন</button>
   `);
+  const existingSoc = Array.isArray(d.social_links) && d.social_links.length > 0 ? d.social_links : [{platform:'facebook',url:''},{platform:'youtube',url:''},{platform:'linkedin',url:''},{platform:'instagram',url:''},{platform:'whatsapp',url:''}];
+  existingSoc.forEach(s => addAdmSocialRow(s.platform, s.url));
   bindAdmImagePreview('epFile', 'epPhoto', 'epPrev', 'profiles');
 }
 
+function addAdmSocialRow(plat = 'facebook', url = '') {
+  const wrap = document.getElementById('admSocialWrap');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:grid; grid-template-columns:1fr 2fr auto; gap:6px; margin-bottom:6px;';
+  row.innerHTML = `
+    <select class="form-control adm-soc-plat">
+      ${['facebook','youtube','linkedin','instagram','twitter','github','whatsapp','website'].map(p => `<option value="${p}" ${p===plat?'selected':''}>${p}</option>`).join('')}
+    </select>
+    <input type="url" class="form-control adm-soc-url" placeholder="https://..." value="${escapeHtml(url)}">
+    <button type="button" class="btn btn-outline btn-sm" onclick="this.parentElement.remove()"><i class="fa-solid fa-trash"></i></button>
+  `;
+  wrap.appendChild(row);
+}
+
 async function saveAdminProfile(id) {
-  let social_links = [];
-  try { social_links = JSON.parse(document.getElementById('epSocial').value || '[]'); } catch(e) {}
+  const social_links = [];
+  document.querySelectorAll('#admSocialWrap > div').forEach(r => {
+    const u = r.querySelector('.adm-soc-url').value.trim();
+    if (u) social_links.push({ platform: r.querySelector('.adm-soc-plat').value, url: u });
+  });
   await apiFetch('admin_save_profile', {
     method:'POST',
     body: JSON.stringify({
@@ -537,25 +579,62 @@ async function loadAdminQuizzes() {
 
 function openNewQuizModal() {
   openAdmModal(`
-    <h3>নতুন কুইজ / প্রতিযোগিতা</h3>
+    <h3>নতুন কুইজ / পরীক্ষা / প্রতিযোগিতা</h3>
     <div style="display:grid; gap:10px; margin-top:12px;">
-      <input type="text" id="nqTitle" class="form-control" placeholder="কুইজ শিরোনাম *">
-      <input type="text" id="nqCat" class="form-control" placeholder="ক্যাটাগরি (যেমন: সাধারণ জ্ঞান)">
-      <input type="date" id="nqDead" class="form-control">
+      <input type="text" id="nqTitle" class="form-control" placeholder="কুইজ বা প্রতিযোগিতার শিরোনাম *">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input type="text" id="nqCat" class="form-control" placeholder="ক্যাটাগরি (যেমন: সাধারণ জ্ঞান)">
+        <input type="date" id="nqDead" class="form-control">
+      </div>
       <textarea id="nqDesc" class="form-control" rows="2" placeholder="বিবরণ..."></textarea>
-      <textarea id="nqQs" class="form-control" rows="5" placeholder='প্রশ্ন JSON: [{"q":"প্রশ্ন?","options":["ক","খ","গ","ঘ"],"ans":0}]'>[{"q":"মহেশখালী কোন জেলায় অবস্থিত?","options":["কক্সবাজার","চট্টগ্রাম","ফেনী","বান্দরবান"],"ans":0}]</textarea>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong>প্রশ্নসমূহ:</strong>
+        <button type="button" class="btn btn-outline btn-sm" onclick="addQuizQuestionRow()"><i class="fa-solid fa-plus"></i> প্রশ্ন যুক্ত করুন</button>
+      </div>
+      <div id="quizQsBuilder"></div>
       <button class="btn btn-primary" onclick="saveNewQuiz()">তৈরি করুন</button>
     </div>
   `);
+  addQuizQuestionRow();
+}
+
+function addQuizQuestionRow() {
+  const wrap = document.getElementById('quizQsBuilder');
+  const box = document.createElement('div');
+  box.className = 'qq-row';
+  box.style.cssText = 'background:#f7fbfa; padding:10px; border-radius:10px; border:1px solid var(--border); margin-bottom:8px; display:grid; gap:6px;';
+  box.innerHTML = `
+    <input type="text" class="form-control qq-text" placeholder="প্রশ্ন লিখুন...">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+      <input type="text" class="form-control qq-opt" placeholder="অপশন ক">
+      <input type="text" class="form-control qq-opt" placeholder="অপশন খ">
+      <input type="text" class="form-control qq-opt" placeholder="অপশন গ">
+      <input type="text" class="form-control qq-opt" placeholder="অপশন ঘ">
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <select class="form-control qq-ans" style="width:170px;">
+        <option value="0">সঠিক উত্তর: ক</option><option value="1">সঠিক উত্তর: খ</option>
+        <option value="2">সঠিক উত্তর: গ</option><option value="3">সঠিক উত্তর: ঘ</option>
+      </select>
+      <button type="button" class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="this.closest('.qq-row').remove()"><i class="fa-solid fa-trash"></i></button>
+    </div>
+  `;
+  wrap.appendChild(box);
 }
 
 async function saveNewQuiz() {
-  let qs = [];
-  try { qs = JSON.parse(document.getElementById('nqQs').value); } catch(e) { return showToast('সঠিক JSON ফরম্যাট দিন'); }
+  const qs = [];
+  document.querySelectorAll('#quizQsBuilder .qq-row').forEach(r => {
+    const q = r.querySelector('.qq-text').value.trim();
+    const opts = Array.from(r.querySelectorAll('.qq-opt')).map(i => i.value.trim()).filter(Boolean);
+    const ans = parseInt(r.querySelector('.qq-ans').value);
+    if (q && opts.length > 0) qs.push({ q, options: opts, ans });
+  });
+  if (!document.getElementById('nqTitle').value.trim()) return showToast('কুইজের শিরোনাম দিন');
   await apiFetch('admin_save_quiz', {
     method:'POST',
     body: JSON.stringify({
-      id:0, title: document.getElementById('nqTitle').value, category: document.getElementById('nqCat').value,
+      id:0, title: document.getElementById('nqTitle').value, category: document.getElementById('nqCat').value || 'কুইজ',
       deadline: document.getElementById('nqDead').value, description: document.getElementById('nqDesc').value,
       questions: qs, status: 'active'
     })
@@ -908,4 +987,33 @@ function quickViewProfile(p) {
       <div style="background:#f4f9f7; padding:10px; border-radius:8px;"><strong>স্বপ্ন:</strong> ${escapeHtml(p.future_dream)}</div>
     </div>
   `);
+}
+
+async function loadAdminSubscribers() {
+  const res = await apiFetch('admin_subscribers');
+  const list = res.ok ? (res.subscribers || []) : [];
+  document.getElementById('adminContent').innerHTML = `
+    <h3 style="margin-bottom:12px;">সাবস্ক্রাইবার তালিকা (${list.length})</h3>
+    <div class="data-table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>ইমেইল</th><th>তারিখ</th><th>অ্যাকশন</th></tr></thead>
+        <tbody>
+          ${list.map((s, i) => `
+            <tr>
+              <td>${i+1}</td>
+              <td><strong>${escapeHtml(s.email)}</strong></td>
+              <td>${escapeHtml(s.created_at || '-')}</td>
+              <td><button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteSubscriber(${s.id})"><i class="fa-solid fa-trash"></i></button></td>
+            </tr>
+          `).join('') || '<tr><td colspan="4" style="text-align:center;">কোনো সাবস্ক্রাইবার নেই</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function deleteSubscriber(id) {
+  await apiFetch('admin_delete_subscriber', { method:'POST', body:JSON.stringify({id}) });
+  showToast('সাবস্ক্রাইবার মুছে ফেলা হয়েছে');
+  loadAdminSubscribers();
 }

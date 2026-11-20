@@ -211,6 +211,16 @@ function closeModal() {
   document.getElementById('mainModal').classList.remove('open');
 }
 
+
+function buildYearOptions(selected = '', placeholder = 'এসএসসি ব্যাচ (১৯৭১–বর্তমান)') {
+  const cy = new Date().getFullYear();
+  let html = `<option value="">${placeholder}</option>`;
+  for (let y = cy; y >= 1971; y--) {
+    html += `<option value="${y}" ${String(selected) === String(y) ? 'selected' : ''}>SSC ${y}</option>`;
+  }
+  return html;
+}
+
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -311,6 +321,25 @@ function navigate(page) {
 // ==========================================
 // HOME PAGE
 // ==========================================
+
+let HERO_BANNER_IDX = 0;
+let HERO_BANNER_TIMER = null;
+function setHeroBanner(idx) {
+  const banners = [STATE.settings.banner_url || 'assets/images/banner1.png', 'assets/images/banner2.png'];
+  HERO_BANNER_IDX = idx % banners.length;
+  const img = document.getElementById('heroSlideImg');
+  if (img) {
+    img.style.opacity = '0.25';
+    setTimeout(() => { img.src = banners[HERO_BANNER_IDX]; img.style.opacity = '1'; }, 180);
+  }
+}
+function startHeroBannerSlider() {
+  if (HERO_BANNER_TIMER) clearInterval(HERO_BANNER_TIMER);
+  HERO_BANNER_TIMER = setInterval(() => {
+    if (document.getElementById('heroSlideImg')) setHeroBanner(HERO_BANNER_IDX + 1);
+  }, 4500);
+}
+
 async function renderHome() {
   const c = STATE.counts;
   const root = document.getElementById('appRoot');
@@ -326,8 +355,12 @@ async function renderHome() {
             <button class="btn btn-ghost-white" onclick="navigate('profiles')"><i class="fa-solid fa-users"></i> সকল প্রোফাইল দেখুন</button>
           </div>
         </div>
-        <div style="text-align:center;">
-          <img src="${escapeHtml(STATE.settings.banner_url || 'assets/images/banner1.png')}" alt="মহেশখালীয়ান ব্যানার" style="width:100%; max-height:240px; object-fit:cover; border-radius:16px; border:2px solid rgba(255,255,255,0.2);">
+        <div style="position:relative; border-radius:16px; overflow:hidden; border:2px solid rgba(255,255,255,0.24); height:235px; box-shadow:0 12px 28px rgba(0,0,0,0.25);">
+          <img id="heroSlideImg" src="${escapeHtml(STATE.settings.banner_url || 'assets/images/banner1.png')}" alt="মহেশখালীয়ান ব্যানার" style="width:100%; height:100%; object-fit:cover; transition:opacity 0.6s ease;">
+          <div style="position:absolute; bottom:10px; right:10px; display:flex; gap:6px;">
+            <button type="button" onclick="setHeroBanner(0)" style="width:10px; height:10px; border-radius:50%; border:none; background:#fff; cursor:pointer; opacity:0.9;"></button>
+            <button type="button" onclick="setHeroBanner(1)" style="width:10px; height:10px; border-radius:50%; border:none; background:#fff; cursor:pointer; opacity:0.6;"></button>
+          </div>
         </div>
       </div>
     </section>
@@ -435,6 +468,7 @@ async function renderHome() {
     </section>
   `;
 
+  startHeroBannerSlider();
   const [pRes, fRes, nRes, poRes, qRes, aRes] = await Promise.all([
     apiCall(`action=profiles`),
     apiCall(`action=posts&category=future`),
@@ -852,7 +886,7 @@ function openTakeQuizModal(q) {
     <p style="color:var(--muted); font-size:0.9rem; margin-bottom:14px;">${escapeHtml(q.description)}</p>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px;">
       <input type="text" id="qzName" class="form-control" placeholder="আপনার পূর্ণ নাম *" required>
-      <input type="text" id="qzBatch" class="form-control" placeholder="এসএসসি ব্যাচ (যেমন: 2019)">
+      <select id="qzBatch" class="form-control">${buildYearOptions("", "এসএসসি ব্যাচ নির্বাচন করুন")}</select>
       <input type="text" id="qzMobile" class="form-control" placeholder="মোবাইল নম্বর" style="grid-column:1/-1;">
     </div>
     <div id="qzQuestionsWrap">
@@ -1145,6 +1179,27 @@ function openPostSubmitModal(cat) {
     news: 'ব্রেকিং নিউজ লিখুন',
     poem: 'কবিতা ও অভিজ্ঞতা শেয়ার করুন'
   };
+  const futureExtras = cat === 'future' ? `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input type="text" id="postSubPen" class="form-control" placeholder="ছদ্মনাম (ঐচ্ছিক)">
+        <select id="postSubUnion" class="form-control">
+          <option value="">ইউনিয়ন / পৌরসভা</option>
+          <option>মহেশখালী পৌরসভা</option><option>বড় মহেশখালী</option><option>ছোট মহেশখালী</option>
+          <option>হোয়ানক</option><option>কালারমারছড়া</option><option>মাতারবাড়ী</option>
+          <option>ধলঘাটা</option><option>কুতুবজোম</option><option>শাপলাপুর</option>
+        </select>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input type="text" id="postSubMobile" class="form-control" placeholder="মোবাইল নম্বর">
+        <input type="email" id="postSubEmail" class="form-control" placeholder="ইমেইল ঠিকানা">
+      </div>
+      <select id="postSubPubAs" class="form-control">
+        <option value="own">নিজের নামে প্রকাশ করুন</option>
+        <option value="pen">ছদ্মনামে প্রকাশ করুন</option>
+        <option value="anon">নাম প্রকাশ না করে</option>
+      </select>
+      <input type="text" id="postSubSummary" class="form-control" placeholder="সংক্ষিপ্ত সারসংক্ষেপ (ঐচ্ছিক)">
+  ` : '';
   openModal(`
     <h2 style="margin-bottom:4px;"><i class="fa-solid fa-pen-nib" style="color:var(--primary)"></i> ${labels[cat] || 'নতুন লেখা'}</h2>
     <p style="font-size:0.86rem; color:var(--muted); margin-bottom:12px;">এডমিন অনুমোদনের পর আপনার লেখাটি প্রকাশিত হবে।</p>
@@ -1152,9 +1207,10 @@ function openPostSubmitModal(cat) {
       <input type="text" id="postSubTitle" class="form-control" placeholder="শিরোনাম *">
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         <input type="text" id="postSubAuthor" class="form-control" placeholder="লেখকের নাম *">
-        <input type="text" id="postSubBatch" class="form-control" placeholder="এসএসসি ব্যাচ (ঐচ্ছিক)">
+        <select id="postSubBatch" class="form-control">${buildYearOptions('', 'এসএসসি ব্যাচ (ঐচ্ছিক)')}</select>
       </div>
-      <input type="text" id="postSubTag" class="form-control" placeholder="ক্যাটাগরি/ট্যাগ (যেমন: শিক্ষা, উন্নয়ন, কবিতা)">
+      ${futureExtras}
+      <input type="text" id="postSubTag" class="form-control" placeholder="ক্যাটাগরি/ট্যাগ (যেমন: শিক্ষা, প্রযুক্তি, পর্যটন, কবিতা)">
       <textarea id="postSubContent" class="form-control" rows="5" placeholder="বিস্তারিত লিখুন... *"></textarea>
       <div style="background:#f8fbfa; padding:10px; border-radius:10px; border:1px solid var(--border);">
         <label style="font-weight:700; font-size:0.88rem;">ছবি আপলোড অথবা লিংক (প্রিভিউসহ):</label>
@@ -1180,7 +1236,13 @@ async function submitPublicPost(category) {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
       category, title, author_name,
-      author_batch: document.getElementById('postSubBatch').value.trim(),
+      author_batch: document.getElementById('postSubBatch').value,
+      pen_name: document.getElementById('postSubPen')?.value.trim() || '',
+      union_name: document.getElementById('postSubUnion')?.value || '',
+      author_mobile: document.getElementById('postSubMobile')?.value.trim() || '',
+      author_email: document.getElementById('postSubEmail')?.value.trim() || '',
+      publish_as: document.getElementById('postSubPubAs')?.value || 'own',
+      summary: document.getElementById('postSubSummary')?.value.trim() || '',
       tag: document.getElementById('postSubTag').value.trim() || 'সাধারণ',
       content,
       image: document.getElementById('postPhotoUrl').value.trim()

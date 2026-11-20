@@ -45,6 +45,16 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
+    // Auto-migrate optional columns safely
+    $extraCols = array(
+        "ALTER TABLE posts ADD COLUMN pen_name TEXT DEFAULT ''",
+        "ALTER TABLE posts ADD COLUMN union_name TEXT DEFAULT ''",
+        "ALTER TABLE posts ADD COLUMN summary TEXT DEFAULT ''",
+        "ALTER TABLE posts ADD COLUMN publish_as TEXT DEFAULT 'own'"
+    );
+    foreach ($extraCols as $sqlCol) {
+        try { $pdo->exec($sqlCol); } catch (Exception $ignore) {}
+    }
     // Ensure subscribers, uploaded_files & sessions tables exist
     $pdo->exec("CREATE TABLE IF NOT EXISTS uploaded_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -411,8 +421,8 @@ if ($action === 'submit_post') {
     if ($title === '' || $content === '' || $author === '') {
         respond(array('ok' => false, 'error' => 'শিরোনাম, বিষয়বস্তু ও লেখকের নাম আবশ্যক'), 400);
     }
-    $stmt = $pdo->prepare("INSERT INTO posts (category, title, content, author_name, author_batch, author_mobile, author_email, tag, image, status)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
+    $stmt = $pdo->prepare("INSERT INTO posts (category, title, content, author_name, author_batch, author_mobile, author_email, tag, image, pen_name, union_name, summary, publish_as, status)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
     $stmt->execute(array(
         $cat,
         $title,
@@ -422,7 +432,11 @@ if ($action === 'submit_post') {
         isset($b['author_mobile']) ? trim($b['author_mobile']) : '',
         isset($b['author_email']) ? trim($b['author_email']) : '',
         isset($b['tag']) ? trim($b['tag']) : 'সাধারণ',
-        isset($b['image']) ? trim($b['image']) : ''
+        isset($b['image']) ? trim($b['image']) : '',
+        isset($b['pen_name']) ? trim($b['pen_name']) : '',
+        isset($b['union_name']) ? trim($b['union_name']) : '',
+        isset($b['summary']) ? trim($b['summary']) : '',
+        isset($b['publish_as']) ? trim($b['publish_as']) : 'own'
     ));
     respond(array('ok' => true, 'id' => $pdo->lastInsertId(), 'message' => 'আপনার লেখাটি সফলভাবে জমা হয়েছে! এডমিন অনুমোদনের পর প্রকাশিত হবে।'));
 }
@@ -920,6 +934,20 @@ if ($action === 'admin_save_settings') {
         if ($k === 'action' || $k === 'token') continue;
         $stmt->execute(array($k, is_string($v) ? trim($v) : json_encode($v)));
     }
+    respond(array('ok' => true));
+}
+
+
+// Admin Subscribers
+if ($action === 'admin_subscribers') {
+    requirePermission($pdo, 'reports');
+    $rows = $pdo->query("SELECT * FROM subscribers ORDER BY id DESC")->fetchAll();
+    respond(array('ok' => true, 'subscribers' => $rows));
+}
+if ($action === 'admin_delete_subscriber') {
+    requirePermission($pdo, 'reports');
+    $b = getJsonBody();
+    $pdo->prepare("DELETE FROM subscribers WHERE id = ?")->execute(array(intval($b['id'])));
     respond(array('ok' => true));
 }
 
