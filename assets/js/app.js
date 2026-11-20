@@ -1,14 +1,21 @@
 
 // Safe API Wrapper: Uses live PHP api.php on web host, seamlessly falls back to MK_SEED if PHP is inactive
+let MK_PHP_ALIVE = null;
 async function apiCall(queryStr, opts = {}) {
-  try {
-    const res = await fetch(`${API}?${queryStr}`, opts);
-    const txt = await res.text();
-    const trimmed = txt.trim();
-    if (!trimmed.startsWith('<')) {
-      return JSON.parse(trimmed);
+  if (MK_PHP_ALIVE !== false) {
+    try {
+      const res = await fetch(`${API}?${queryStr}`, opts);
+      const txt = (await res.text()).replace(/^\uFEFF/, '').trim();
+      if (!txt.startsWith('<') && (txt.startsWith('{') || txt.startsWith('['))) {
+        MK_PHP_ALIVE = true;
+        return JSON.parse(txt);
+      } else {
+        MK_PHP_ALIVE = false;
+      }
+    } catch (e) {
+      MK_PHP_ALIVE = false;
     }
-  } catch (e) {}
+  }
   return mkLocalFallback(queryStr, opts);
 }
 

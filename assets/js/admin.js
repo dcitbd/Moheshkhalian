@@ -42,15 +42,25 @@ function closeAdmModal() {
   document.getElementById('adminModal').classList.remove('open');
 }
 
+let ADM_PHP_ALIVE = null;
 async function apiFetch(action, opts = {}) {
-  try {
-    const headers = opts.headers || {};
-    if (ADM.token) headers['X-Auth-Token'] = ADM.token;
-    if (opts.body && !(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
-    const res = await fetch(`${API}?action=${action}`, { ...opts, headers });
-    const txt = (await res.text()).trim();
-    if (!txt.startsWith('<')) return JSON.parse(txt);
-  } catch (e) {}
+  if (ADM_PHP_ALIVE !== false) {
+    try {
+      const headers = opts.headers || {};
+      if (ADM.token) headers['X-Auth-Token'] = ADM.token;
+      if (opts.body && !(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+      const res = await fetch(`${API}?action=${action}`, { ...opts, headers });
+      const txt = (await res.text()).replace(/^\uFEFF/, '').trim();
+      if (!txt.startsWith('<') && (txt.startsWith('{') || txt.startsWith('['))) {
+        ADM_PHP_ALIVE = true;
+        return JSON.parse(txt);
+      } else {
+        ADM_PHP_ALIVE = false;
+      }
+    } catch (e) {
+      ADM_PHP_ALIVE = false;
+    }
+  }
   return mkAdminFallback(action, opts);
 }
 
