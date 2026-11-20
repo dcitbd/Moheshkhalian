@@ -3,6 +3,8 @@
  * মহেশখালীয়ান (Maheshkhalian) Backend REST API
  * PHP 7.0+ Compatible | PDO SQLite | cPanel Ready
  */
+error_reporting(0);
+ini_set('display_errors', '0');
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');

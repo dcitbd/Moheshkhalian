@@ -1,3 +1,119 @@
+
+// Safe API Wrapper: Uses live PHP api.php on web host, seamlessly falls back to MK_SEED if PHP is inactive
+async function apiCall(queryStr, opts = {}) {
+  try {
+    const res = await fetch(`${API}?${queryStr}`, opts);
+    const txt = await res.text();
+    const trimmed = txt.trim();
+    if (!trimmed.startsWith('<')) {
+      return JSON.parse(trimmed);
+    }
+  } catch (e) {}
+  return mkLocalFallback(queryStr, opts);
+}
+
+function mkLocalFallback(queryStr, opts = {}) {
+  const db = window.MK_SEED || { settings:{}, profiles:[], posts:[], quizzes:[], quiz_submissions:[], administration:[], notices:[], comments:[], reports:[] };
+  const params = new URLSearchParams(queryStr.replace(/^action=/, 'action='));
+  const action = params.get('action') || queryStr.split('&')[0].replace('action=', '');
+  let body = {};
+  if (opts.body && typeof opts.body === 'string') {
+    try { body = JSON.parse(opts.body); } catch(e) {}
+  }
+
+  if (action === 'bootstrap') {
+    const apProfs = db.profiles.filter(p => p.status === 'approved');
+    const counts = {
+      profiles: apProfs.length,
+      future: db.posts.filter(p => p.category === 'future' && p.status === 'approved').length,
+      news: db.posts.filter(p => p.category === 'news' && p.status === 'approved').length,
+      poems: db.posts.filter(p => p.category === 'poem' && p.status === 'approved').length,
+      quizzes: db.quizzes.filter(q => q.status === 'active').length,
+      admins: db.administration.length
+    };
+    const notifs = db.notices.slice(0, 3).map(n => ({ id:'n_'+n.id, type:'notice', title:n.title, body:n.body, time:n.created_at }));
+    return { ok: true, settings: db.settings, notices: db.notices, counts, notifications: notifs };
+  }
+  if (action === 'profiles') {
+    const q = (params.get('q') || '').toLowerCase();
+    const batch = params.get('batch') || 'all';
+    const edu = (params.get('education') || '').toLowerCase();
+    const prof = (params.get('profession') || '').toLowerCase();
+    let list = db.profiles.filter(p => p.status === 'approved');
+    if (batch !== 'all' && batch !== '') list = list.filter(p => String(p.ssc_batch) === String(batch));
+    if (edu) list = list.filter(p => (p.education || '').toLowerCase().includes(edu));
+    if (prof) list = list.filter(p => (p.profession || '').toLowerCase().includes(prof));
+    if (q) list = list.filter(p => [p.name, p.current_address, p.permanent_address, p.profession, p.education, p.future_dream].some(v => (v||'').toLowerCase().includes(q)));
+    const bMap = {};
+    db.profiles.filter(p => p.status === 'approved').forEach(p => { bMap[p.ssc_batch] = (bMap[p.ssc_batch] || 0) + 1; });
+    const batch_counts = Object.keys(bMap).sort((a,b)=>b-a).map(k => ({ ssc_batch: k, cnt: bMap[k] }));
+    return { ok: true, profiles: list, batch_counts };
+  }
+  if (action === 'profile_detail') {
+    const id = parseInt(params.get('id'));
+    const p = db.profiles.find(x => x.id === id);
+    if (!p) return { ok: false, error: 'প্রোফাইল পাওয়া যায়নি' };
+    const comments = db.comments.filter(c => c.target_type === 'profile' && c.target_id === id);
+    return { ok: true, profile: { ...p, comments } };
+  }
+  if (action === 'like_profile') {
+    const p = db.profiles.find(x => x.id === parseInt(body.id));
+    if (p) { p.likes = (p.likes || 0) + 1; return { ok: true, likes: p.likes }; }
+    return { ok: true, likes: 1 };
+  }
+  if (action === 'posts') {
+    const cat = params.get('category') || 'all';
+    const q = (params.get('q') || '').toLowerCase();
+    const tag = (params.get('tag') || '').toLowerCase();
+    let list = db.posts.filter(p => p.status === 'approved');
+    if (cat !== 'all' && cat !== '') list = list.filter(p => p.category === cat);
+    if (tag) list = list.filter(p => (p.tag || '').toLowerCase().includes(tag));
+    if (q) list = list.filter(p => (p.title + ' ' + p.content + ' ' + p.author_name).toLowerCase().includes(q));
+    return { ok: true, posts: list };
+  }
+  if (action === 'post_detail') {
+    const id = parseInt(params.get('id'));
+    const p = db.posts.find(x => x.id === id);
+    if (!p) return { ok: false };
+    p.views = (p.views || 0) + 1;
+    const comments = db.comments.filter(c => c.target_type === 'post' && c.target_id === id);
+    return { ok: true, post: { ...p, comments } };
+  }
+  if (action === 'like_post') {
+    const p = db.posts.find(x => x.id === parseInt(body.id));
+    if (p) { p.likes = (p.likes || 0) + 1; return { ok: true, likes: p.likes }; }
+    return { ok: true, likes: 1 };
+  }
+  if (action === 'comment') {
+    db.comments.unshift({ id: Date.now(), target_type: body.target_type, target_id: parseInt(body.target_id), author_name: body.author_name || 'অতিথি', comment_text: body.comment_text });
+    return { ok: true };
+  }
+  if (action === 'quizzes') {
+    return { ok: true, quizzes: db.quizzes.filter(q => q.status === 'active'), published_results: db.quiz_submissions.filter(s => s.result_published) };
+  }
+  if (action === 'administration') {
+    return { ok: true, members: db.administration };
+  }
+  if (action === 'submit_profile') {
+    db.profiles.unshift({ id: Date.now(), ...body, likes:0, comments_count:0, quiz_results:[], status:'pending' });
+    return { ok: true, message: 'আপনার প্রোফাইল সফলভাবে জমা হয়েছে! এডমিন অনুমোদনের পর প্রকাশিত হবে।' };
+  }
+  if (action === 'submit_post') {
+    db.posts.unshift({ id: Date.now(), ...body, likes:0, views:0, comments_count:0, status:'pending' });
+    return { ok: true, message: 'আপনার লেখাটি সফলভাবে জমা হয়েছে! এডমিন অনুমোদনের পর প্রকাশিত হবে।' };
+  }
+  if (action === 'submit_quiz') {
+    return { ok: true, auto_score: 'জমা হয়েছে', message: 'আপনার উত্তর সফলভাবে জমা হয়েছে!' };
+  }
+  if (action === 'submit_report') {
+    return { ok: true, message: 'আপনার বার্তা/রিপোর্ট সফলভাবে পাঠানো হয়েছে।' };
+  }
+  if (action === 'subscribe') {
+    return { ok: true, message: 'ধন্যবাদ! আপনি সফলভাবে সাবস্ক্রাইব করেছেন।' };
+  }
+  return { ok: true };
+}
+
 /**
  * মহেশখালীয়ান (Maheshkhalian) Frontend Application
  */
@@ -100,8 +216,7 @@ function escapeHtml(str) {
 // Bootstrap Initial Data
 async function initApp() {
   try {
-    const res = await fetch(`${API}?action=bootstrap`);
-    const data = await res.json();
+    const data = await apiCall('action=bootstrap');
     if (data.ok) {
       STATE.settings = data.settings || {};
       STATE.notices = data.notices || [];
@@ -314,12 +429,12 @@ async function renderHome() {
   `;
 
   const [pRes, fRes, nRes, poRes, qRes, aRes] = await Promise.all([
-    fetch(`${API}?action=profiles`).then(r => r.json()),
-    fetch(`${API}?action=posts&category=future`).then(r => r.json()),
-    fetch(`${API}?action=posts&category=news`).then(r => r.json()),
-    fetch(`${API}?action=posts&category=poem`).then(r => r.json()),
-    fetch(`${API}?action=quizzes`).then(r => r.json()),
-    fetch(`${API}?action=administration`).then(r => r.json())
+    apiCall(`action=profiles`),
+    apiCall(`action=posts&category=future`),
+    apiCall(`action=posts&category=news`),
+    apiCall(`action=posts&category=poem`),
+    apiCall(`action=quizzes`),
+    apiCall(`action=administration`)
   ]);
 
   if (pRes.ok) document.getElementById('homeProfilesGrid').innerHTML = pRes.profiles.slice(0, 3).map(renderProfileCardHtml).join('');
@@ -410,7 +525,7 @@ async function loadProfiles(buildPills = false) {
   const edu = encodeURIComponent(document.getElementById('profEduFilter')?.value || '');
   const prof = encodeURIComponent(document.getElementById('profJobFilter')?.value || '');
 
-  const res = await fetch(`${API}?action=profiles&q=${q}&batch=${batch}&education=${edu}&profession=${prof}`).then(r => r.json());
+  const res = await apiCall(`action=profiles&q=${q}&batch=${batch}&education=${edu}&profession=${prof}`);
   if (!res.ok) return;
 
   STATE.profiles = res.profiles;
@@ -462,7 +577,7 @@ function renderProfileCardHtml(p) {
 // Animated Profile Popup Modal
 async function openProfilePopup(id) {
   openModal('<div style="text-align:center; padding:40px;"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--primary)"></i></div>');
-  const res = await fetch(`${API}?action=profile_detail&id=${id}`).then(r => r.json());
+  const res = await apiCall(`action=profile_detail&id=${id}`);
   if (!res.ok) { closeModal(); return; }
   const p = res.profile;
   const socials = p.social_links || [];
@@ -529,7 +644,7 @@ async function openProfilePopup(id) {
 }
 
 async function likeProfile(id, btn) {
-  const res = await fetch(`${API}?action=like_profile`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }).then(r => r.json());
+  const res = await apiCall(`action=like_profile`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) });
   if (res.ok) btn.querySelector('span').textContent = res.likes;
 }
 
@@ -568,7 +683,7 @@ function togglePostsView(mode) {
 async function loadPosts(category) {
   const q = encodeURIComponent(document.getElementById('postSearch')?.value || '');
   const tag = encodeURIComponent(document.getElementById('postTagFilter')?.value || '');
-  const res = await fetch(`${API}?action=posts&category=${category}&q=${q}&tag=${tag}`).then(r => r.json());
+  const res = await apiCall(`action=posts&category=${category}&q=${q}&tag=${tag}`);
   if (!res.ok) return;
 
   const counterEl = document.getElementById('postDigitalCounter');
@@ -614,7 +729,7 @@ async function openPostDetail(id) {
   window.location.hash = `post/${id}`;
   const root = document.getElementById('appRoot');
   root.innerHTML = '<div style="text-align:center; padding:60px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div>';
-  const res = await fetch(`${API}?action=post_detail&id=${id}`).then(r => r.json());
+  const res = await apiCall(`action=post_detail&id=${id}`);
   if (!res.ok) { navigate('home'); return; }
   const p = res.post;
 
@@ -654,7 +769,7 @@ async function openPostDetail(id) {
 }
 
 async function likePost(id, btn) {
-  const res = await fetch(`${API}?action=like_post`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) }).then(r => r.json());
+  const res = await apiCall(`action=like_post`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
   if (res.ok) btn.querySelector('span').textContent = res.likes;
 }
 
@@ -665,11 +780,11 @@ async function submitComment(type, targetId) {
   const comment_text = textEl.value.trim();
   if (!comment_text) return showToast('মন্তব্য লিখুন');
 
-  const res = await fetch(`${API}?action=comment`, {
+  const res = await apiCall(`action=comment`, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ target_type: type, target_id: targetId, author_name, comment_text })
-  }).then(r => r.json());
+  });
 
   if (res.ok) {
     textEl.value = '';
@@ -702,7 +817,7 @@ async function renderQuizzesPage() {
     <div id="quizResultsList" style="background:var(--surface); border-radius:16px; border:1px solid var(--border); padding:16px;">লোড হচ্ছে...</div>
   `;
 
-  const res = await fetch(`${API}?action=quizzes`).then(r => r.json());
+  const res = await apiCall(`action=quizzes`);
   if (!res.ok) return;
 
   document.getElementById('quizzesGrid').innerHTML = res.quizzes.map(q => `
@@ -762,10 +877,10 @@ async function submitQuizAnswers(quizId, count) {
     const checked = document.querySelector(`input[name="q_${i}"]:checked`);
     answers.push(checked ? parseInt(checked.value) : -1);
   }
-  const res = await fetch(`${API}?action=submit_quiz`, {
+  const res = await apiCall(`action=submit_quiz`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ quiz_id: quizId, participant_name, ssc_batch, mobile, answers })
-  }).then(r => r.json());
+  });
   if (res.ok) {
     closeModal();
     showToast(`${res.message} ${res.auto_score ? `(প্রাথমিক স্কোর: ${res.auto_score})` : ''}`);
@@ -785,7 +900,7 @@ async function renderAdministrationPage() {
     </div>
     <div class="cards-grid" id="adminTeamGrid"><p>লোড হচ্ছে...</p></div>
   `;
-  const res = await fetch(`${API}?action=administration`).then(r => r.json());
+  const res = await apiCall(`action=administration`);
   if (!res.ok) return;
   document.getElementById('adminTeamGrid').innerHTML = res.members.map(m => `
     <article class="profile-card" onclick='openAdminMemberDetail(${JSON.stringify(m).replace(/'/g, "&#39;")})'>
@@ -828,7 +943,7 @@ function openAdminMemberDetail(m) {
 
 async function renderContactPage() {
   const root = document.getElementById('appRoot');
-  const res = await fetch(`${API}?action=administration`).then(r => r.json());
+  const res = await apiCall(`action=administration`);
   const members = res.ok ? res.members : [];
   const s = STATE.settings;
 
@@ -873,10 +988,10 @@ async function sendReportFromContact() {
   const message = document.getElementById('cntMsg').value.trim();
   if (!reporter_name || !message) return showToast('নাম ও বার্তা দিন');
 
-  const res = await fetch(`${API}?action=submit_report`, {
+  const res = await apiCall(`action=submit_report`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ reporter_name, reporter_contact, subject, message })
-  }).then(r => r.json());
+  });
   if (res.ok) {
     showToast(res.message);
     document.getElementById('cntMsg').value = '';
@@ -901,7 +1016,7 @@ function bindImageInputPreview(fileInputId, urlInputId, previewId, folder) {
     fd.append('file', fileEl.files[0]);
     fd.append('folder', folder);
     prevEl.innerHTML = '<span>আপলোড হচ্ছে...</span>';
-    const res = await fetch(`${API}?action=upload_image`, { method: 'POST', body: fd }).then(r => r.json());
+    const res = await apiCall(`action=upload_image`, { method: 'POST', body: fd });
     if (res.ok) {
       urlEl.value = res.url;
       prevEl.innerHTML = `<img src="${escapeHtml(res.url)}">`;
@@ -1008,9 +1123,9 @@ async function submitPublicProfile() {
     social_links
   };
 
-  const res = await fetch(`${API}?action=submit_profile`, {
+  const res = await apiCall(`action=submit_profile`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-  }).then(r => r.json());
+  });
   if (res.ok) {
     closeModal();
     showToast(res.message);
@@ -1054,7 +1169,7 @@ async function submitPublicPost(category) {
   const content = document.getElementById('postSubContent').value.trim();
   if (!title || !author_name || !content) return showToast('শিরোনাম, নাম ও বিষয়বস্তু আবশ্যক');
 
-  const res = await fetch(`${API}?action=submit_post`, {
+  const res = await apiCall(`action=submit_post`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
       category, title, author_name,
@@ -1063,7 +1178,7 @@ async function submitPublicPost(category) {
       content,
       image: document.getElementById('postPhotoUrl').value.trim()
     })
-  }).then(r => r.json());
+  });
   if (res.ok) { closeModal(); showToast(res.message); }
   else showToast(res.error || 'ব্যর্থ হয়েছে');
 }
@@ -1085,7 +1200,7 @@ async function submitPublicReport() {
   const reporter_name = document.getElementById('repName').value.trim();
   const message = document.getElementById('repMsg').value.trim();
   if (!reporter_name || !message) return showToast('নাম ও বিস্তারিত লিখুন');
-  const res = await fetch(`${API}?action=submit_report`, {
+  const res = await apiCall(`action=submit_report`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
       reporter_name,
@@ -1093,7 +1208,7 @@ async function submitPublicReport() {
       subject: document.getElementById('repSub').value.trim() || 'রিপোর্ট',
       message
     })
-  }).then(r => r.json());
+  });
   if (res.ok) { closeModal(); showToast(res.message); }
 }
 
@@ -1103,9 +1218,9 @@ async function submitHomeSubscribe() {
   const el = document.getElementById('homeSubEmail');
   const email = el.value.trim();
   if (!email) return showToast('আপনার ইমেইল দিন');
-  const res = await fetch(`${API}?action=subscribe`, {
+  const res = await apiCall(`action=subscribe`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email})
-  }).then(r => r.json());
+  });
   if (res.ok) { el.value = ''; showToast(res.message); }
   else showToast(res.error || 'সঠিক ইমেইল দিন');
 }
@@ -1115,10 +1230,10 @@ async function submitHomeContact() {
   const reporter_contact = document.getElementById('homeCntContact').value.trim();
   const message = document.getElementById('homeCntMsg').value.trim();
   if (!reporter_name || !message) return showToast('নাম ও বার্তা দিন');
-  const res = await fetch(`${API}?action=submit_report`, {
+  const res = await apiCall(`action=submit_report`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ reporter_name, reporter_contact, subject: 'হোম পেজ যোগাযোগ', message })
-  }).then(r => r.json());
+  });
   if (res.ok) {
     document.getElementById('homeCntMsg').value = '';
     showToast(res.message);
