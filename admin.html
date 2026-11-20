@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>এডমিন প্যানেল — মহেশখালীয়ান (Maheshkhalian)</title>
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.maateen.me/solaiman-lipi/font.css" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <style>
+    body { padding-bottom: 0; background: #eef3f2; }
+    .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: radial-gradient(circle at top right, #0e4f43, #06151c 72%); }
+    .auth-card { background: #fff; border-radius: 22px; width: 100%; max-width: 430px; padding: 30px; box-shadow: var(--shadow-lg); animation: popIn 0.35s ease; }
+    .admin-layout { display: grid; grid-template-columns: 1fr; min-height: 100vh; }
+    @media (min-width: 960px) { .admin-layout { grid-template-columns: 265px 1fr; } }
+    .admin-sidebar { background: var(--navy); color: #d5e7e2; padding: 20px 14px; display: flex; flex-direction: column; gap: 6px; }
+    .side-btn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: none; background: transparent; color: #cbe0da; font-size: 0.94rem; font-weight: 600; cursor: pointer; text-align: left; transition: all 0.2s; }
+    .side-btn:hover, .side-btn.active { background: rgba(44,230,181,0.16); color: #fff; }
+    .side-btn i { width: 20px; text-align: center; color: #2ce6b5; }
+    .admin-main { padding: 20px; overflow-x: hidden; }
+    .admin-topbar { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .data-table-wrap { background: #fff; border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+    th { background: #f4f9f7; color: var(--navy); font-weight: 700; white-space: nowrap; }
+    .status-pill { padding: 3px 10px; border-radius: 99px; font-size: 0.78rem; font-weight: 700; display: inline-block; }
+    .st-approved, .st-active, .st-resolved { background: #dcfce7; color: #166534; }
+    .st-pending { background: #fef3c7; color: #92400e; }
+    .st-rejected { background: #fee2e2; color: #991b1b; }
+    .timelock-clock { font-family: var(--font-en); font-size: 2.2rem; font-weight: 800; color: var(--primary); text-align: center; margin: 10px 0; }
+  </style>
+</head>
+<body>
+
+  <!-- STEP 1: LOGIN SCREEN -->
+  <div id="loginView" class="auth-wrap" style="display:none;">
+    <div class="auth-card">
+      <div style="text-align:center; margin-bottom:18px;">
+        <img src="assets/images/logo.png" style="width:68px; height:68px; border-radius:50%; object-fit:contain; background:#f0f7f5; padding:6px;">
+        <h2 style="margin-top:8px; color:var(--navy);">এডমিন প্যানেল লগইন</h2>
+        <p style="font-size:0.86rem; color:var(--muted);">মহেশখালীয়ান (Maheshkhalian) • রোল-ভিত্তিক এক্সেস</p>
+      </div>
+      <input type="email" id="loginEmail" class="form-control" placeholder="ইমেইল (যেমন: admin@maheshkhalian.com)" style="margin-bottom:10px;">
+      <input type="password" id="loginPass" class="form-control" placeholder="পাসওয়ার্ড" style="margin-bottom:14px;">
+      <button class="btn btn-primary" style="width:100%;" onclick="doAdminLogin()"><i class="fa-solid fa-right-to-bracket"></i> লগইন করুন</button>
+      <div style="text-align:center; margin-top:14px;">
+        <a href="index.html" style="font-size:0.88rem; color:var(--primary); font-weight:600;"><i class="fa-solid fa-arrow-left"></i> মূল ওয়েবসাইটে ফিরুন</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: TIME LOCK SCREEN -->
+  <div id="timelockView" class="auth-wrap" style="display:none;">
+    <div class="auth-card" style="text-align:center;">
+      <div style="width:64px; height:64px; margin:0 auto 10px; border-radius:50%; background:var(--primary-light); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:1.7rem;">
+        <i class="fa-solid fa-shield-halved"></i>
+      </div>
+      <h2 style="color:var(--navy);">সিকিউরিটি টাইম লক</h2>
+      <p style="font-size:0.86rem; color:var(--muted);">স্বাগতম, <strong id="tlUserName"></strong>! ড্যাশবোর্ডে প্রবেশ করতে টাইম লক পিন দিন।</p>
+      <div class="timelock-clock" id="tlClock">00:00:00</div>
+      <input type="password" id="tlPinInput" class="form-control" placeholder="টাইম লক পিন লিখুন (ডিফল্ট: 1971)" style="text-align:center; font-size:1.1rem; letter-spacing:4px; margin-bottom:12px;">
+      <button class="btn btn-primary" style="width:100%;" onclick="verifyTimeLock()"><i class="fa-solid fa-unlock-keyhole"></i> আনলক ও ড্যাশবোর্ড খুলুন</button>
+      <button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="doAdminLogout()">লগআউট</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: ROLE-BASED DASHBOARD -->
+  <div id="dashboardView" class="admin-layout" style="display:none;">
+    <aside class="admin-sidebar">
+      <div style="display:flex; align-items:center; gap:10px; padding:8px 10px 16px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:8px;">
+        <img src="assets/images/logo.png" style="width:38px; height:38px; border-radius:10px; background:#fff; padding:3px;">
+        <div>
+          <div style="font-weight:700; color:#fff;">মহেশখালীয়ান</div>
+          <div style="font-size:0.75rem; color:#8bf5d8;">এডমিন ড্যাশবোর্ড</div>
+        </div>
+      </div>
+      <div id="sidebarMenu"></div>
+      <div style="margin-top:auto; padding-top:14px; border-top:1px solid rgba(255,255,255,0.1);">
+        <a href="index.html" class="side-btn"><i class="fa-solid fa-globe"></i> লাইভ সাইট দেখুন</a>
+        <button class="side-btn" onclick="doAdminLogout()" style="color:#fca5a5;"><i class="fa-solid fa-power-off" style="color:#fca5a5;"></i> লগআউট</button>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <div class="admin-topbar">
+        <div>
+          <h3 id="adminPageTitle" style="color:var(--navy);">ড্যাশবোর্ড ওভারভিউ</h3>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <img id="admUserPhoto" src="assets/images/logo.png" style="width:38px; height:38px; border-radius:50%; object-fit:cover; border:2px solid var(--primary);">
+          <div style="line-height:1.2;">
+            <div id="admUserName" style="font-weight:700; font-size:0.92rem;"></div>
+            <small id="admUserRole" style="color:var(--muted);"></small>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminContent"></div>
+    </main>
+  </div>
+
+  <!-- Admin Modal -->
+  <div class="modal-backdrop" id="adminModal" onclick="if(event.target===this) closeAdmModal()">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeAdmModal()"><i class="fa-solid fa-xmark"></i></button>
+      <div id="adminModalBody" style="padding:24px;"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toastBox"></div>
+  <script src="assets/js/admin.js"></script>
+</body>
+</html>
